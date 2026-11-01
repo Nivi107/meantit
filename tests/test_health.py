@@ -11,7 +11,7 @@ def test_health_reports_ok():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert set(body["configured"]) == {"paypal_paymart", "paypal_fund", "database", "anthropic"}
+    assert set(body["configured"]) == {"paypal_paymart", "paypal_fund", "paypal_webhooks", "database", "anthropic"}
 
 
 def test_health_never_leaks_secrets():

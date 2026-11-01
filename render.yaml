@@ -19,9 +19,13 @@ services:
         sync: false
       - key: PAYPAL_PAYMART_SECRET
         sync: false
+      - key: PAYPAL_PAYMART_WEBHOOK_ID
+        sync: false
       - key: PAYPAL_FUND_CLIENT_ID
         sync: false
       - key: PAYPAL_FUND_SECRET
+        sync: false
+      - key: PAYPAL_FUND_WEBHOOK_ID
         sync: false
       - key: DATABASE_URL
         sync: false
