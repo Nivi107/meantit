@@ -1,0 +1,32 @@
+# Render Blueprint for the MeantIt API.
+# On Render: New → Blueprint → pick this repo. Values marked `sync: false`
+# are asked for during setup (copy them from your local .env).
+
+services:
+  - type: web
+    name: meantit-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: PAYPAL_BASE_URL
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_PAYMART_CLIENT_ID
+        sync: false
+      - key: PAYPAL_PAYMART_SECRET
+        sync: false
+      - key: PAYPAL_FUND_CLIENT_ID
+        sync: false
+      - key: PAYPAL_FUND_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # The frontend's URL, e.g. https://meantit-web.onrender.com (for CORS)
+      - key: FRONTEND_URL
+        sync: false
