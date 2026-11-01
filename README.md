@@ -37,6 +37,12 @@ You need Python 3.10+.
 python3 scripts/paypal_vault_auth_test.py
 ```
 
+Copy the vault ID it prints into `.env` as `SANDBOX_VAULT_ID`, then check that the app's own PayPal code (`app/paypal.py`) can hold, capture, refund and void with no popup:
+
+```bash
+.venv/bin/python scripts/paypal_lifecycle_check.py
+```
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint for the API. The database runs on Neon. After the frontend is deployed, set `FRONTEND_URL` to its URL so the browser is allowed to call the API. The free server sleeps when idle, so the first request can take up to a minute.
