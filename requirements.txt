@@ -2,3 +2,8 @@ fastapi==0.162.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 python-dotenv==1.2.4
+PyJWT[crypto]==2.15.1
+cryptography==50.0.2
+SQLAlchemy==2.0.57
+psycopg[binary]==3.3.8
+anthropic==2.7.0

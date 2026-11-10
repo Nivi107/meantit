@@ -11,11 +11,12 @@ def test_health_reports_ok():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert set(body["configured"]) == {"paypal_paymart", "paypal_fund", "paypal_webhooks", "database", "anthropic"}
+    assert set(body["configured"]) == {"paypal_paymart", "paypal_fund", "paypal_webhooks", "signing_keys", "database", "anthropic"}
 
 
 def test_health_never_leaks_secrets():
     text = client.get("/health").text
-    secrets = [config.PAYPAL_PAYMART_SECRET, config.PAYPAL_FUND_SECRET, config.ANTHROPIC_API_KEY, config.DATABASE_URL]
+    secrets = [config.PAYPAL_PAYMART_SECRET, config.PAYPAL_FUND_SECRET, config.ANTHROPIC_API_KEY, config.DATABASE_URL,
+               config.MARKETPLACE_SIGNING_KEY, config.DEMO_AGENT_SIGNING_KEY, config.CHECK_SIGNING_KEY]
     for value in filter(None, secrets):
         assert value not in text

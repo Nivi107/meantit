@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from app import webhooks
@@ -22,11 +21,6 @@ class FakeClient:
     def verify_webhook(self, headers, event):
         self.calls += 1
         return self.verified
-
-
-@pytest.fixture(autouse=True)
-def clear_recent():
-    webhooks.recent.clear()
 
 
 def use_fake(monkeypatch, verified):

@@ -31,6 +31,12 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: MARKETPLACE_SIGNING_KEY
+        sync: false
+      - key: DEMO_AGENT_SIGNING_KEY
+        sync: false
+      - key: CHECK_SIGNING_KEY
+        sync: false
       # The frontend's URL, e.g. https://meantit-web.onrender.com (for CORS)
       - key: FRONTEND_URL
         sync: false

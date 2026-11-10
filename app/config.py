@@ -25,8 +25,16 @@ PAYPAL_FUND_CLIENT_ID = _env("PAYPAL_FUND_CLIENT_ID")
 PAYPAL_FUND_SECRET = _env("PAYPAL_FUND_SECRET")
 PAYPAL_FUND_WEBHOOK_ID = _env("PAYPAL_FUND_WEBHOOK_ID")
 
+# Demo shortcut until the first-purchase popup is built: the Demo Shopper's saved PayPal account.
+SANDBOX_VAULT_ID = _env("SANDBOX_VAULT_ID")
+
 DATABASE_URL = _env("DATABASE_URL")
 ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
+
+# ES256 private keys as JWK JSON (make them with scripts/generate_keys.py).
+MARKETPLACE_SIGNING_KEY = _env("MARKETPLACE_SIGNING_KEY")
+DEMO_AGENT_SIGNING_KEY = _env("DEMO_AGENT_SIGNING_KEY")
+CHECK_SIGNING_KEY = _env("CHECK_SIGNING_KEY")
 
 # Origins allowed to call the API from a browser. Local Vite dev server is always allowed.
 FRONTEND_URL = _env("FRONTEND_URL")
