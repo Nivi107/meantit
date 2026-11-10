@@ -58,3 +58,8 @@ def test_checkout_rejects_missing_size_mixed_sellers_and_unknown_products():
     mixed = {"items": [{"product_id": "p01", "size_us": 9}, {"product_id": "p07", "size_us": 9}]}
     assert client.post("/store/checkouts", json=mixed).status_code == 422
     assert client.post("/store/checkouts", json={"items": [{"product_id": "nope"}]}).status_code == 404
+
+
+def test_marketplace_for_the_shopping_slip():
+    assert client.get("/store/marketplace").json() == {"id": "mkt_paymart", "name": "PayMart",
+                                                      "website": "https://paymart.example"}

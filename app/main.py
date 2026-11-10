@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,12 +8,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import agent, config, db, orders, store, webhooks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("meantit")
+
+EXPIRE_EVERY = 300  # seconds between sweeps for unanswered holds
+
+
+async def expire_holds_forever():
+    """Void HOLDs nobody answered within 24 hours. GET /orders also does this, in case the server slept."""
+    while True:
+        await asyncio.sleep(EXPIRE_EVERY)
+        try:
+            expired = await asyncio.to_thread(orders.expire_holds)
+            if expired:
+                log.info("voided %d expired hold(s)", expired)
+        except Exception:  # noqa: BLE001  (keep sweeping)
+            log.exception("expiring holds failed")
 
 
 @asynccontextmanager
 async def lifespan(app):
     db.init()
+    sweeper = asyncio.create_task(expire_holds_forever())
     yield
+    sweeper.cancel()
+    with suppress(asyncio.CancelledError):
+        await sweeper
 
 
 app = FastAPI(

@@ -168,12 +168,16 @@ def _act_on_decision(order_id: str, decision: str, authorization_id: str) -> dic
 @router.get("/orders")
 def list_orders(user_id: str | None = None, limit: int = 50):
     expire_holds()
-    query = select(db.orders.c.id).order_by(db.orders.c.created_at.desc()).limit(min(limit, 200))
+    query = select(db.orders).order_by(db.orders.c.created_at.desc()).limit(min(limit, 200))
     if user_id:
         query = query.where(db.orders.c.user_id == user_id)
+    # Two queries for the whole list: Neon is a network hop away, so one query per order adds up.
     with db.engine.connect() as conn:
-        ids = [row.id for row in conn.execute(query)]
-    return [order_view(order_id) for order_id in ids]
+        rows = [dict(row._mapping) for row in conn.execute(query)]
+        ids = [row["id"] for row in rows]
+        checks = {row.order_id: dict(row._mapping)
+                  for row in conn.execute(select(db.checks).where(db.checks.c.order_id.in_(ids)))} if ids else {}
+    return [_view(row, checks.get(row["id"], {})) for row in rows]
 
 
 @router.get("/orders/{order_id}")
@@ -232,7 +236,10 @@ def order_view(order_id: str) -> dict:
     order = _order(order_id)
     with db.engine.connect() as conn:
         check = conn.execute(select(db.checks).where(db.checks.c.order_id == order_id)).first()
-    check = dict(check._mapping) if check else {}
+    return _view(order, dict(check._mapping) if check else {})
+
+
+def _view(order: dict, check: dict) -> dict:
     findings = check.get("findings") or []
     cart = order["cart"] or {}
     seller = store.SELLERS.get(order["seller_id"], {})

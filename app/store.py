@@ -90,6 +90,12 @@ def get_product(product_id: str) -> dict:
 
 # ---- endpoints ----
 
+@router.get("/marketplace")
+def marketplace():
+    """What the browser puts in the shopping slip's allowed-marketplace list."""
+    return {key: MARKETPLACE[key] for key in ("id", "name", "website")}
+
+
 @router.get("/products")
 def list_products(q: str = "", max_price: int | None = None):
     """Search products. max_price is in cents."""
