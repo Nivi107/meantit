@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import config, db, orders, store, webhooks
+from app import agent, config, db, orders, store, webhooks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(webhooks.router)
 app.include_router(store.router)
 app.include_router(orders.router)
+app.include_router(agent.router)
 
 
 @app.get("/health")

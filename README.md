@@ -71,6 +71,25 @@ Tests never call Claude. These two scripts do, and print what they cost:
 .venv/bin/python scripts/ai_eval.py    # 39 labelled cases, ~$0.10 (or: ai_eval.py classify)
 ```
 
+## Demo shopping agent
+
+`POST /agent/runs` takes the user's signed slips 1 and 2 and a `mode`, shops PayMart in the
+background, then sends the cart through the guard. Poll `GET /agent/runs/{id}` for its steps.
+
+| mode | agent | demo scene |
+|---|---|---|
+| `careful` | Claude Haiku, treats page text as information only | 1: right shoe, ALLOW |
+| `naive` | a scraper with no AI, obeys notes for AI assistants | 2: poisoned page, BLOCK |
+| `skim` | Claude Haiku told to buy the cheapest shoe without reading pages | 3: wrong shoe, HOLD |
+
+Claude wouldn't follow the poisoned note even when told to, so scene 2 uses the naive scraper.
+A run's picks are saved, so the same scene again costs nothing (`"fresh": true` asks again).
+
+```bash
+.venv/bin/python scripts/agent_smoke.py           # each mode once, no PayPal, ~$0.02
+.venv/bin/python scripts/agent_sandbox_check.py   # all scenes end to end with the PayPal sandbox
+```
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint for the API. The database runs on Neon. After the frontend is deployed, set `FRONTEND_URL` to its URL so the browser is allowed to call the API. The free server sleeps when idle, so the first request can take up to a minute.

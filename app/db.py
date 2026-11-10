@@ -6,7 +6,7 @@ never changes. Signed slips and Check records are never edited after saving.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import (JSON, Column, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
+from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, MetaData, String, Table, Text,
                         create_engine, insert)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
@@ -87,6 +87,30 @@ webhook_events = Table(
     Column("status", String),
     Column("payload", JSON),
     Column("received_at", DateTime(timezone=True), default=utcnow),
+)
+
+agent_runs = Table(
+    "agent_runs", metadata,
+    Column("id", String, primary_key=True),
+    Column("user_id", String, ForeignKey("users.id")),
+    Column("mode", String),
+    Column("request", Text),
+    Column("status", String),            # running, done, failed
+    Column("steps", JSON),               # what the agent did, for the progress screen
+    Column("replayed", Boolean, default=False),  # replayed a saved run instead of asking Claude
+    Column("cost_usd", Float, default=0.0),
+    Column("order_id", String, ForeignKey("orders.id")),
+    Column("error", Text),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Column("updated_at", DateTime(timezone=True), default=utcnow, onupdate=utcnow),
+)
+
+agent_plans = Table(
+    "agent_plans", metadata,
+    Column("key", String, primary_key=True),  # hash of mode, request, budget, prompt version
+    Column("steps", JSON),
+    Column("lines", JSON),                    # the cart the agent chose
+    Column("created_at", DateTime(timezone=True), default=utcnow),
 )
 
 used_nonces = Table(
