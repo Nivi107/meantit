@@ -90,6 +90,32 @@ A run's picks are saved, so the same scene again costs nothing (`"fresh": true` 
 .venv/bin/python scripts/agent_sandbox_check.py   # all scenes end to end with the PayPal sandbox
 ```
 
+## Dashboard and evidence
+
+- `GET /dashboard/orders`: every agent order PayMart received, with the reasons and which demo agent placed it.
+- `GET /orders/{id}/evidence`: the four signed pieces as received, the signed Check record and the shopper's public key.
+- `GET /keys`: PayMart's and MeantIt's public keys. The dashboard's **Verify signatures** button re-checks
+  every signature and hash in the browser with these, so nobody has to trust our backend's word.
+
+## Protection Fund and claims
+
+The second layer. If an order MeantIt approved turns out to be the agent's mistake, the shopper sends it
+back, PayMart refunds them, and the Protection Fund repays PayMart's costs with **PayPal Payouts**.
+
+1. `POST /orders/{id}/claims` (shopper). Code checks coverage first: only orders MeantIt approved, with a
+   signed request; a HOLD the shopper approved themselves isn't covered; repeat claimers go to a person.
+2. The claim judge (Claude Sonnet) compares the claim with the signed request, the Check record and anything
+   published after checkout, and returns `AGENT_ERROR`, `CHANGED_MIND`, `NOT_RECEIVED` or `SUSPICIOUS`
+   with a confidence. Code applies it: below 0.7, suspicious, or no AI goes to the admin's review queue;
+   `NOT_RECEIVED` belongs to PayPal Seller Protection, so the fund doesn't pay twice.
+3. `POST /claims/{id}/return-received` (PayMart): refunds the capture in full, reads the PayPal fee from the
+   capture, and pays PayMart's losses (return label, the fee, the item if it can't be resold) from the fund,
+   never more than the order total or the fund's balance.
+4. `POST /claims/{id}/review` (admin) decides queued claims. `GET /fund` shows the balance and ledger:
+   an opening sandbox reserve plus 1% of every captured order, minus reimbursements.
+
+The AI never moves money: it returns a verdict, and code checks the rules and calls PayPal.
+
 ## Deploy
 
 `render.yaml` is a Render Blueprint for the API. The database runs on Neon. After the frontend is deployed, set `FRONTEND_URL` to its URL so the browser is allowed to call the API. The free server sleeps when idle, so the first request can take up to a minute.

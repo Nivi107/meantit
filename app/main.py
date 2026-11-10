@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import agent, config, db, orders, store, webhooks
+from app import agent, claims, config, dashboard, db, orders, store, webhooks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("meantit")
@@ -53,6 +53,8 @@ app.include_router(webhooks.router)
 app.include_router(store.router)
 app.include_router(orders.router)
 app.include_router(agent.router)
+app.include_router(dashboard.router)
+app.include_router(claims.router)
 
 
 @app.get("/health")

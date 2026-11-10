@@ -71,3 +71,12 @@ class InjectionVerdict(BaseModel):
     addresses_ai: bool = Field(description="True if the text speaks to an AI agent or tries to steer what it buys")
     asks: InjectionAsk | None = Field(None, description="What the text wants bought, if anything")
     quote: str = Field("", description="The instruction, copied exactly")
+
+
+# ---- the claim judge (app/claims.py) ----
+
+class ClaimVerdict(BaseModel):
+    verdict: Literal["AGENT_ERROR", "CHANGED_MIND", "NOT_RECEIVED", "SUSPICIOUS"]
+    confidence: float = Field(description="0 to 1: how sure the verdict is")
+    reasons: list[str] = Field(description="Short plain-language reasons, most important first")
+    new_information: str = Field("", description="What is known now that wasn't at checkout, copied exactly")

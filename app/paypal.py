@@ -142,6 +142,30 @@ class PayPalClient:
             body["amount"] = {"currency_code": currency, "value": to_paypal_amount(amount_cents)}
         return self._request("POST", f"/v2/payments/captures/{capture_id}/refund", body, request_id)
 
+    def get_capture(self, capture_id: str) -> dict:
+        """Includes seller_receivable_breakdown.paypal_fee: what PayPal kept from the sale."""
+        return self._request("GET", f"/v2/payments/captures/{capture_id}")
+
+    # ---- payouts (the Protection Fund reimbursing PayMart) ----
+
+    def create_payout(self, receiver_merchant_id: str, amount_cents: int, *, note: str, batch_id: str,
+                      currency: str = "USD") -> dict:
+        """Send money to one PayPal account. batch_id makes a retry pay only once."""
+        body = {
+            "sender_batch_header": {"sender_batch_id": batch_id, "email_subject": "MeantIt Protection Fund"},
+            "items": [{
+                "recipient_type": "PAYPAL_ID",
+                "receiver": receiver_merchant_id,
+                "amount": {"currency": currency, "value": to_paypal_amount(amount_cents)},
+                "note": note,
+                "sender_item_id": batch_id,
+            }],
+        }
+        return self._request("POST", "/v1/payments/payouts", body, request_id=batch_id)
+
+    def get_payout(self, payout_batch_id: str) -> dict:
+        return self._request("GET", f"/v1/payments/payouts/{payout_batch_id}")
+
     # ---- webhooks ----
 
     def verify_webhook(self, headers, event: dict) -> bool:

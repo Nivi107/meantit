@@ -113,6 +113,39 @@ agent_plans = Table(
     Column("created_at", DateTime(timezone=True), default=utcnow),
 )
 
+claims = Table(
+    "claims", metadata,
+    Column("id", String, primary_key=True),
+    Column("order_id", String, ForeignKey("orders.id"), unique=True, nullable=False),  # one claim per order
+    Column("user_id", String, ForeignKey("users.id")),
+    Column("text", Text),                 # the shopper's own words
+    Column("status", String),             # NOT_COVERED, IN_REVIEW, DECLINED, APPROVED, REFUNDED, REIMBURSED
+    Column("status_reason", Text),
+    Column("verdict", JSON),              # the judge's answer, as returned
+    Column("judge_model", String),
+    Column("reviewed_by", String),        # "judge", or "admin" after manual review
+    Column("losses", JSON),               # what PayMart lost, item by item, in cents
+    Column("refund_id", String),
+    Column("payout_batch_id", String),
+    Column("payout_status", String),
+    Column("reimbursed", Integer),        # cents
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+    Column("updated_at", DateTime(timezone=True), default=utcnow, onupdate=utcnow),
+)
+
+fund_ledger = Table(
+    "fund_ledger", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ref", String, unique=True, nullable=False),  # e.g. "contribution:ord_x", so nothing is counted twice
+    Column("kind", String, nullable=False),               # reserve, contribution, reimbursement
+    Column("amount", Integer, nullable=False),            # cents: + in, - out
+    Column("order_id", String),
+    Column("claim_id", String),
+    Column("paypal_ref", String),
+    Column("note", Text),
+    Column("created_at", DateTime(timezone=True), default=utcnow),
+)
+
 used_nonces = Table(
     "used_nonces", metadata,
     Column("nonce", String, primary_key=True),
