@@ -3,3 +3,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 meantit-dev.db
+
+# Local tools: demo video recording and DB reset
+scripts/demo_video.py
+scripts/demo_overlay.js
+scripts/reset_db.py

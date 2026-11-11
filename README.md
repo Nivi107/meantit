@@ -2,11 +2,97 @@
 
 A checkout guard for orders placed by AI shopping agents. PayPal holds the money while MeantIt checks that the cart is what the user meant and that the agent wasn't tricked. Good orders are captured, doubtful ones go back to the user, and bad ones are voided before any money moves.
 
-This repo is the FastAPI backend. The web app is in the `meantit-web` repo.
+This repo is the FastAPI backend. The web app is in [meantit-web](https://github.com/Nivi107/meantit-web).
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/).
 
-> **Work in progress.** This README will grow as the project does.
+## Try it
+
+- **Live demo:** https://meantit-web.onrender.com (click **Run the demo**)
+- **API:** https://meantit-api.onrender.com, with interactive docs at https://meantit-api.onrender.com/docs
+
+The servers run on Render's free tier and sleep when idle. The first visit can take about a minute;
+the header says "Waking the server" until the API answers. Everything runs on the PayPal sandbox, so
+no real money moves and there is no login: the demo uses one saved sandbox PayPal account.
+
+**A 3-minute walkthrough:**
+
+1. **Shopper → Create my key.** Your browser makes a P-256 signing key. The request ("running shoes for
+   flat feet, size US 9, under $150, delivered within a week") and a $150 limit are signed with it.
+2. **A careful agent.** Claude Haiku shops PayMart and picks the right shoe. PayPal holds the money,
+   MeantIt checks the order, and the payment is **captured**.
+3. **PayMart → StableRun Pro → Show what the agent saw.** One listing hides a "note for AI assistants"
+   that people can't see.
+4. **A tricked agent** obeys that note. MeantIt finds the hidden instruction and the shoe that doesn't fit,
+   so the PayPal hold is **voided** and the shopper is never charged.
+5. **A careless agent** buys the cheapest shoe without reading. It isn't clearly wrong, so the order is
+   **held** and the shopper decides: yes captures, no releases the hold.
+6. **Orders & claims → the scene 1 order → Report a problem.** News after checkout shows that shoe was
+   wrong. **Merchant → Claims → Send to Protection Fund.** The claim judge approves it, **Return received**
+   refunds the shopper through PayPal, and the fund repays PayMart with **PayPal Payouts**.
+7. **Merchant** shows every order in AG Grid; **Verify signatures** re-checks the evidence in your browser.
+   **Admin** shows the fund's balance, the ledger and the judge's reasoning.
+
+Saved agent runs replay, so the demo scenes cost no AI calls after the first time.
+
+## How it works
+
+```
+Shopper signs ──► Agent shops ──► Checkout: PayPal AUTHORIZES (money held, not charged)
+                                        │
+                                        ▼
+                         MeantIt guard: verify ─ collect ─ check ─ decide ─ record
+                                        │
+             ┌──────────────────────────┼──────────────────────────┐
+             ▼                          ▼                          ▼
+     ALLOW: CAPTURE             HOLD: ask the shopper         BLOCK: VOID
+                                (24 h, then the hold is released)
+```
+
+- **Verify (code):** the four signed pieces (AP2-style mandates: what you want, the most you may spend, the
+  marketplace's cart and the agent's final OK), their links, expiry, replays and the spending limit.
+- **Check (Claude, code decides):** what the shopper's words require, whether each item meets it with a quote
+  from the product data as proof, and whether any page text the agent read was aimed at AI agents.
+- **Record:** a Check record signed by MeantIt, so the marketplace can prove later what was checked and why.
+- **Protection Fund:** 1% of every captured guarded order. If MeantIt approved an order that turns out to be
+  the agent's mistake, the fund repays the marketplace's costs.
+
+### PayPal APIs used
+
+| API | What for |
+|---|---|
+| Orders v2 with `intent: AUTHORIZE` and a vaulted PayPal account | The agent pays with no popup; the money is held, not captured |
+| Payments: capture, void, refund | Capture good orders, void bad ones, refund approved claims |
+| Payouts | The Protection Fund repays the marketplace from its own sandbox account |
+| Webhooks | PayPal confirms each money movement (`/webhooks/paypal/paymart` and `/webhooks/paypal/fund`) |
+
+### AI used
+
+| Where | Model | Job |
+|---|---|---|
+| Guard: what the request requires | Claude Sonnet 5.5 | Turns the shopper's words into a checklist |
+| Guard: does the cart fit | Claude Sonnet 5.5 | Checks each item against the checklist, quoting the product data |
+| Guard: hidden instructions | Claude Haiku 5.5 | Classifies page text the agent read as aimed at AI agents or not |
+| Demo shopping agents | Claude Haiku 5.5 | The careful and careless agents (tool use over the PayMart catalogue) |
+| Claim judge | Claude Sonnet 5.5 | Agent mistake, changed mind, not received or suspicious, with a confidence |
+
+Claude only reports, using structured JSON. Code applies the rules, decides and moves the money. If Claude
+fails, refuses or times out, the order is held for the shopper and the claim goes to a person.
+
+**Built with:** Claude Code was used as a coding assistant while building the project.
+
+### Stack
+
+FastAPI, SQLAlchemy and Postgres (Neon) for the API; React, Vite, Tailwind CSS and **AG Grid** Community for
+the web app; both hosted on **Render**. Signatures are ES256 JWTs (P-256); the shopper's key is made and kept in the browser with WebCrypto.
+
+### What a real launch would change
+
+- There are no logins: the header switches between the shopper, marketplace and admin views. Real logins would
+  replace that, with each marketplace seeing only its own orders.
+- The demo shares one saved sandbox PayPal account; each shopper would save their own once.
+- The Protection Fund is presented as a service guarantee; a launch would confirm the legal structure or
+  partner with a licensed insurer.
 
 ## Run it locally
 
