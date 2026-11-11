@@ -1,6 +1,7 @@
 """PayPalClient tests against a fake PayPal (no network)."""
 
 import json
+import time
 
 import httpx
 import pytest
@@ -141,3 +142,28 @@ def test_response_helpers():
     assert first_authorization(order)["id"] == "A1"
     assert vault_id_of({}) is None
     assert first_authorization({}) is None
+
+
+def test_a_network_failure_is_a_paypal_error(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    def no_dns(request):
+        raise httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
+    client = PayPalClient("id", "secret", "https://paypal.test", http=httpx.Client(transport=httpx.MockTransport(no_dns)))
+    with pytest.raises(PayPalError) as err:
+        client.get_order("O1")
+    assert err.value.name == "NETWORK_ERROR"  # so a checkout ends FAILED instead of stuck at CREATED
+
+
+def test_a_moment_without_network_is_retried(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    calls = []
+    def blip(request):
+        calls.append(request.url.path)
+        if len(calls) == 1:
+            raise httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
+        if request.url.path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        return httpx.Response(200, json={"id": "O1", "status": "APPROVED"})
+    client = PayPalClient("id", "secret", "https://paypal.test", http=httpx.Client(transport=httpx.MockTransport(blip)))
+    assert client.get_order("O1")["status"] == "APPROVED"
+    assert len(calls) == 3  # the token request twice, then the order

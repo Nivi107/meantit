@@ -11,6 +11,7 @@ import httpx
 
 from app import config
 
+CONNECT_TRIES = 3  # a moment without DNS or network shouldn't fail a checkout
 
 class PayPalError(Exception):
     """A PayPal call failed. `name` is PayPal's error code, e.g. ORDER_NOT_APPROVED."""
@@ -51,11 +52,8 @@ class PayPalClient:
         # Tokens last about 9 hours; reuse one until a minute before it expires.
         if self._token and time.time() < self._token_expires_at - 60:
             return self._token
-        response = self.http.post(
-            f"{self.base_url}/v1/oauth2/token",
-            auth=(self.client_id, self.secret),
-            data={"grant_type": "client_credentials"},
-        )
+        response = self._send("POST", f"{self.base_url}/v1/oauth2/token", auth=(self.client_id, self.secret),
+                              data={"grant_type": "client_credentials"})
         if response.status_code != 200:
             raise PayPalError(response.status_code, _json(response))
         body = response.json()
@@ -70,10 +68,23 @@ class PayPalClient:
             # Same request_id on a retry means PayPal does the work only once.
             headers["PayPal-Request-Id"] = request_id or str(uuid.uuid4())
             headers["Prefer"] = "return=representation"
-        response = self.http.request(method, f"{self.base_url}{path}", json=json, headers=headers)
+        response = self._send(method, f"{self.base_url}{path}", json=json, headers=headers)
         if response.status_code >= 400:
             raise PayPalError(response.status_code, _json(response))
         return _json(response)
+
+    def _send(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """A network failure (no DNS, timeout) becomes a PayPalError too, so callers handle it like any other.
+        A request that never connected is sent again: PayPal never saw it, so nothing can happen twice."""
+        for attempt in range(CONNECT_TRIES):
+            try:
+                return self.http.request(method, url, **kwargs)
+            except httpx.ConnectError as err:
+                if attempt + 1 == CONNECT_TRIES:
+                    raise PayPalError(0, {"name": "NETWORK_ERROR", "message": str(err)}) from err
+                time.sleep(attempt + 1)
+            except httpx.HTTPError as err:
+                raise PayPalError(0, {"name": "NETWORK_ERROR", "message": str(err)}) from err
 
     # ---- orders ----
 

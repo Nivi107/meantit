@@ -151,6 +151,23 @@ def test_held_order_approved_is_captured(monkeypatch, fake_paypal):
     assert (approved["payment_status"], approved["resolution"]) == ("CAPTURED", "APPROVED")
 
 
+def test_paypal_down_when_approving_changes_nothing(monkeypatch, fake_paypal):
+    use_ai(monkeypatch, FakeAI(verdict="not_met", quote="Flat cushioned sole, lifestyle design"))
+    order = place_order("p11")[1].json()
+
+    def down(*args, **kwargs):
+        raise paypal.PayPalError(0, {"name": "NETWORK_ERROR", "message": "no DNS"})
+    monkeypatch.setattr(fake_paypal, "capture_authorization", down)
+    response = client.post(f"/orders/{order['id']}/approve")
+    assert response.status_code == 502 and "try again" in response.json()["detail"]
+    assert client.get(f"/orders/{order['id']}").json()["payment_status"] == "AUTHORIZED"  # still held, can retry
+
+
+def test_registering_the_same_key_twice_is_fine():
+    register()
+    register()  # the browser sometimes sends it twice; the second used to fail with a 500
+
+
 def test_unanswered_hold_expires_and_is_voided(monkeypatch, fake_paypal):
     use_ai(monkeypatch, FakeAI(verdict="not_met", quote="Flat cushioned sole, lifestyle design"))
     order = place_order("p11")[1].json()

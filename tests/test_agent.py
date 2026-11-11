@@ -153,3 +153,10 @@ def test_no_key_and_no_saved_run(fake_paypal):
 def test_agent_key_is_public():
     jwk = client.get("/agent/key").json()["public_jwk"]
     assert "d" not in jwk and jwk == slips.public_jwk(keys.agent())
+
+
+def test_empty_cart_names_the_budget_when_that_is_why(claude, fake_paypal):
+    claude([[tool("search_products", query="running shoes flat feet", max_price_usd=100)], [tool("submit_cart")]])
+    run_id = client.post("/agent/runs", json={**slips_for(max_cents=10000), "mode": "careful"}).json()["id"]
+    run = client.get(f"/agent/runs/{run_id}").json()
+    assert "within your $100.00 limit" in run["error"] and "from $" in run["error"]

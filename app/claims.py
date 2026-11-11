@@ -1,8 +1,13 @@
 """The Protection Fund and claims (design doc, Module 6): the second layer.
 
-When an approved order turns out to be the agent's mistake, the shopper returns
-it, PayMart refunds the shopper, and the fund repays PayMart's losses through
-PayPal Payouts. Nobody ends up with both the item and the money.
+A shopper reports a problem to PayMart, the way returns work at any shop. PayMart
+then accepts a normal return under its own policy, declines, or sends the claim to
+the MeantIt Protection Fund when it believes the agent got it wrong. That hands the
+claim over: PayMart's click returns at once, and MeantIt checks it on its own side
+afterwards. PayMart and the shopper see only the outcome; the judge's reasoning
+stays in MeantIt's admin console. When the fund covers it, the shopper returns the item, PayMart
+refunds the shopper, and the fund repays PayMart's losses through PayPal Payouts.
+Nobody ends up with both the item and the money.
 
 Code checks coverage first. The claim judge (Claude) only gives a verdict; code
 applies the rules and moves the money. A judge that is unsure, or unavailable,
@@ -12,8 +17,9 @@ sends the claim to a person (the admin's review queue).
 import logging
 import secrets
 from datetime import timedelta
+from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
@@ -32,8 +38,15 @@ CONFIDENCE_MIN = 0.7            # below this the judge's verdict goes to a perso
 REPEAT_CLAIMS = 2               # this many earlier claims in REPEAT_DAYS sends a new one to review
 REPEAT_DAYS = 30
 
+# PayMart's own decisions
+WITH_PAYMART, STORE_RETURN, STORE_REFUNDED, STORE_DECLINED = (
+    "WITH_PAYMART", "STORE_RETURN", "STORE_REFUNDED", "STORE_DECLINED")
+# The fund's decisions, once PayMart sends a claim to MeantIt (SENT_TO_FUND: MeantIt hasn't answered yet)
+SENT_TO_FUND = "SENT_TO_FUND"
 NOT_COVERED, IN_REVIEW, DECLINED = "NOT_COVERED", "IN_REVIEW", "DECLINED"
 APPROVED, REFUNDED, REIMBURSED = "APPROVED", "REFUNDED", "REIMBURSED"
+# Where PayMart can still accept or decline under its own policy: before the fund, or after the fund said no
+STORE_CAN_DECIDE = {WITH_PAYMART, NOT_COVERED, DECLINED}
 
 
 def get_ai():
@@ -41,7 +54,7 @@ def get_ai():
     return guard_ai.default_ai()
 
 
-# ---- the shopper files a claim ----
+# ---- the shopper reports a problem to PayMart ----
 
 class ClaimRequest(BaseModel):
     text: str = Field(min_length=10, max_length=2000)
@@ -49,6 +62,7 @@ class ClaimRequest(BaseModel):
 
 @router.post("/orders/{order_id}/claims")
 def file_claim(order_id: str, body: ClaimRequest, x_user_id: str | None = Header(None)):
+    """No AI here: the claim goes to PayMart first."""
     order = orders._order(order_id)
     if x_user_id and x_user_id != order["user_id"]:
         raise HTTPException(403, "Not your order")
@@ -56,27 +70,65 @@ def file_claim(order_id: str, body: ClaimRequest, x_user_id: str | None = Header
         raise HTTPException(409, "Only a paid order can have a claim")
 
     claim_id = "clm_" + secrets.token_hex(6)
-    status, reason = _coverage(order)
     try:
         with db.engine.begin() as conn:
             conn.execute(insert(db.claims).values(id=claim_id, order_id=order_id, user_id=order["user_id"],
-                                                  text=body.text, status=status or IN_REVIEW,
-                                                  status_reason=reason or "Waiting for the claim judge"))
+                                                  text=body.text, status=WITH_PAYMART,
+                                                  status_reason="Sent to PayMart. They'll answer here."))
     except IntegrityError:
         raise HTTPException(409, "This order already has a claim")
-    if status:
-        return claim_view(claim_id)
-
-    status, reason, verdict, model = _judge(order, body.text)
-    _update(claim_id, status=status, status_reason=reason, verdict=verdict, judge_model=model, reviewed_by="judge")
     return claim_view(claim_id)
+
+
+# ---- PayMart decides: its own return, a no, or the Protection Fund ----
+
+class MerchantDecision(BaseModel):
+    action: Literal["accept_return", "decline", "send_to_fund"]
+    note: str = Field("", max_length=500)
+
+
+@router.post("/claims/{claim_id}/merchant")
+def merchant_decides(claim_id: str, body: MerchantDecision, background: BackgroundTasks):
+    claim = _claim(claim_id)
+    note = f" PayMart's note: {body.note.strip()}" if body.note.strip() else ""
+    if body.action == "send_to_fund":
+        # Only one click wins, so the judge runs once
+        if not _move(claim_id, WITH_PAYMART, status=SENT_TO_FUND, status_reason=(
+                "PayMart sent this to the MeantIt Protection Fund. MeantIt will answer here." + note)):
+            raise HTTPException(409, "Only a new claim can go to the Protection Fund")
+        background.add_task(_fund_decides, claim_id)
+        return claim_view(claim_id)
+    if claim["status"] not in STORE_CAN_DECIDE:
+        raise HTTPException(409, "This claim is past PayMart's decision")
+    if body.action == "accept_return":
+        _update(claim_id, status=STORE_RETURN, status_reason=(
+            "PayMart accepted your return under its own return policy. Send it back for a full refund." + note))
+    else:
+        _update(claim_id, status=STORE_DECLINED, status_reason=(
+            "PayMart declined the return." + note + " If the item isn't as described, PayPal's buyer protection "
+            "still applies."))
+    return claim_view(claim_id)
+
+
+def _fund_decides(claim_id: str):
+    """MeantIt's turn, after PayMart's request has returned: coverage rules in code first, then the claim judge.
+    Saves only if the claim is still waiting, so a person who decided meanwhile isn't overwritten."""
+    claim = _claim(claim_id)
+    order = orders._order(claim["order_id"])
+    status, reason = _coverage(order)
+    if status:
+        _move(claim_id, SENT_TO_FUND, status=status, status_reason=reason)
+        return
+    status, reason, verdict, model = _judge(order, claim["text"])
+    _move(claim_id, SENT_TO_FUND, status=status, status_reason=reason, verdict=verdict, judge_model=model,
+          reviewed_by="judge")
 
 
 def _coverage(order: dict) -> tuple[str | None, str | None]:
     """The rules code checks before any AI. Returns (status, reason) to stop, or (None, None) to judge."""
     if order["decision"] == policy.HOLD and order["resolution"] == "APPROVED":
         return NOT_COVERED, ("MeantIt held this order and you approved it anyway, so the fund doesn't cover it. "
-                             "PayMart's normal return policy still applies.")
+                             "PayMart decides on a normal return.")
     if order["decision"] != policy.ALLOW:
         return NOT_COVERED, "MeantIt didn't approve this order, so the fund doesn't cover it."
     if not order["intent"]:
@@ -109,7 +161,7 @@ def _judge(order: dict, text: str) -> tuple[str, str, dict | None, str | None]:
         return IN_REVIEW, "The judge wasn't confident, so a person checks it.", answer, model
     if verdict.verdict == "CHANGED_MIND":
         return DECLINED, ("What the agent bought matches what you asked for, so this isn't an agent mistake. "
-                          "PayMart's normal return policy still applies."), answer, model
+                          "PayMart decides on a normal return."), answer, model
     return APPROVED, "The agent bought something you didn't mean. Send it back; PayMart refunds you in full.", answer, model
 
 
@@ -143,12 +195,17 @@ def return_received(claim_id: str, body: ReturnReceived = ReturnReceived()):
     claim = _claim(claim_id)
     if claim["status"] == REFUNDED:
         return _reimburse(claim_id)  # the refund went through earlier; try the payout again
-    if claim["status"] != APPROVED:
+    if claim["status"] not in (APPROVED, STORE_RETURN):
         raise HTTPException(409, "This claim isn't waiting for a return")
     order = orders._order(claim["order_id"])
     client = paypal.paymart()
 
     refund = client.refund_capture(order["capture_id"], request_id=f"refund-{claim_id}")
+    if claim["status"] == STORE_RETURN:  # PayMart's own return: it carries the costs, the fund isn't involved
+        orders._update(order["id"], payment_status="REFUNDED")
+        _update(claim_id, status=STORE_REFUNDED, refund_id=refund.get("id"),
+                status_reason="PayMart refunded you in full under its return policy.")
+        return claim_view(claim_id)
     capture = client.get_capture(order["capture_id"])
     fee = _cents(capture.get("seller_receivable_breakdown", {}).get("paypal_fee", {}).get("value"))
     losses = {"return_shipping": RETURN_SHIPPING, "paypal_fee": fee,
@@ -196,15 +253,16 @@ class Review(BaseModel):
 @router.post("/claims/{claim_id}/review")
 def review(claim_id: str, body: Review):
     claim = _claim(claim_id)
-    if claim["status"] != IN_REVIEW:
+    if claim["status"] not in (IN_REVIEW, SENT_TO_FUND):  # SENT_TO_FUND: the judge is stuck, a person decides
         raise HTTPException(409, "This claim isn't waiting for review")
     if body.approve:
         status, reason = APPROVED, "A person reviewed it: the agent made a mistake. Send it back for a full refund."
     else:
-        status, reason = DECLINED, "A person reviewed it and it isn't covered. PayMart's normal return policy applies."
+        status, reason = DECLINED, "A person reviewed it and it isn't covered. PayMart decides on a normal return."
     if body.note:
         reason += f" Note: {body.note}"
-    _update(claim_id, status=status, status_reason=reason, reviewed_by="admin")
+    if not _move(claim_id, claim["status"], status=status, status_reason=reason, reviewed_by="admin"):
+        raise HTTPException(409, "The judge decided this claim a moment ago")
     return claim_view(claim_id)
 
 
@@ -215,15 +273,14 @@ def list_claims(user_id: str | None = None):
     query = select(db.claims).order_by(db.claims.c.created_at.desc())
     if user_id:
         query = query.where(db.claims.c.user_id == user_id)
+    # One connection for both reads: the database is a network round trip away
     with db.engine.connect() as conn:
         rows = [dict(row._mapping) for row in conn.execute(query)]
-    rows = [_refresh_payout(row) for row in rows]
-    with db.engine.connect() as conn:
         ids = [row["order_id"] for row in rows]
         totals = {row.id: row for row in conn.execute(
             select(db.orders.c.id, db.orders.c.total, db.orders.c.intent, db.orders.c.cart)
             .where(db.orders.c.id.in_(ids)))} if ids else {}
-    return [_view(row, totals.get(row["order_id"])) for row in rows]
+    return [_view(_refresh_payout(row), totals.get(row["order_id"])) for row in rows]
 
 
 @router.get("/claims/{claim_id}")
@@ -332,6 +389,14 @@ def _claim(claim_id: str) -> dict:
 def _update(claim_id: str, **values):
     with db.engine.begin() as conn:
         conn.execute(update(db.claims).where(db.claims.c.id == claim_id).values(**values))
+
+
+def _move(claim_id: str, expected: str, **values) -> bool:
+    """Update the claim only if it's still in `expected`. False if someone else moved it first."""
+    with db.engine.begin() as conn:
+        result = conn.execute(update(db.claims).where(db.claims.c.id == claim_id, db.claims.c.status == expected)
+                              .values(**values))
+    return result.rowcount == 1
 
 
 def _cents(value: str | None) -> int:

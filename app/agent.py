@@ -319,13 +319,23 @@ def _run(run_id: str, body: RunRequest, request: str, max_cents: int, plan_key: 
             _save_plan(plan_key, steps, lines)
         _update_run(run_id, cost_usd=cost)
         if not lines:
-            _update_run(run_id, status="done", error="The agent found nothing that fits, so it bought nothing.")
+            _update_run(run_id, status="done", error=_nothing_bought(steps, max_cents))
             return
         order = _checkout(body, lines)
         _update_run(run_id, status="done", order_id=order["id"])
     except Exception as err:  # noqa: BLE001  (show any failure on the run)
         log.exception("agent run %s failed", run_id)
         _update_run(run_id, status="failed", error=str(getattr(err, "detail", None) or err)[:500])
+
+
+def _nothing_bought(steps: list[dict], max_cents: int) -> str:
+    """Say so when the budget is why: the agent's searches matched products that cost more."""
+    pricier = {p["id"]: p["price"] for step in steps if step.get("kind") == "search"
+               for p in store.list_products(step["input"]["query"]) if p["price"] > max_cents}
+    if not pricier:
+        return "The agent found nothing that fits, so it bought nothing."
+    return (f"The agent found nothing that fits within your ${max_cents / 100:.2f} limit, so it bought nothing. "
+            f"{len(pricier)} matching products cost more, from ${min(pricier.values()) / 100:.2f}.")
 
 
 def _checkout(body: RunRequest, lines: list[dict]) -> dict:

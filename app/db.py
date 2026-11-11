@@ -119,11 +119,11 @@ claims = Table(
     Column("order_id", String, ForeignKey("orders.id"), unique=True, nullable=False),  # one claim per order
     Column("user_id", String, ForeignKey("users.id")),
     Column("text", Text),                 # the shopper's own words
-    Column("status", String),             # NOT_COVERED, IN_REVIEW, DECLINED, APPROVED, REFUNDED, REIMBURSED
+    Column("status", String),             # WITH_PAYMART, then PayMart's or the fund's decision (app/claims.py)
     Column("status_reason", Text),
     Column("verdict", JSON),              # the judge's answer, as returned
     Column("judge_model", String),
-    Column("reviewed_by", String),        # "judge", or "admin" after manual review
+    Column("reviewed_by", String),        # "judge", or "admin" after manual review (fund claims only)
     Column("losses", JSON),               # what PayMart lost, item by item, in cents
     Column("refund_id", String),
     Column("payout_batch_id", String),
@@ -167,9 +167,15 @@ def configure(url: str):
         url = "postgresql+psycopg://" + url[len("postgresql://"):]
     if url.startswith("sqlite") and ":memory:" in url:
         engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    else:
+    elif url.startswith("postgresql"):
         # pre_ping: Neon closes idle connections when it sleeps; reconnect instead of failing.
-        engine = create_engine(url, pool_pre_ping=True)
+        # Keepalives and tcp_user_timeout: a connection a flaky network dropped silently fails in
+        # seconds instead of hanging a request for minutes. recycle: don't keep any for long.
+        engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args={
+            "connect_timeout": 10, "keepalives": 1, "keepalives_idle": 20, "keepalives_interval": 5,
+            "keepalives_count": 3, "tcp_user_timeout": 15_000})
+    else:
+        engine = create_engine(url)
     return engine
 
 

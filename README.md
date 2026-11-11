@@ -102,16 +102,24 @@ A run's picks are saved, so the same scene again costs nothing (`"fresh": true` 
 The second layer. If an order MeantIt approved turns out to be the agent's mistake, the shopper sends it
 back, PayMart refunds them, and the Protection Fund repays PayMart's costs with **PayPal Payouts**.
 
-1. `POST /orders/{id}/claims` (shopper). Code checks coverage first: only orders MeantIt approved, with a
-   signed request; a HOLD the shopper approved themselves isn't covered; repeat claimers go to a person.
-2. The claim judge (Claude Sonnet) compares the claim with the signed request, the Check record and anything
-   published after checkout, and returns `AGENT_ERROR`, `CHANGED_MIND`, `NOT_RECEIVED` or `SUSPICIOUS`
-   with a confidence. Code applies it: below 0.7, suspicious, or no AI goes to the admin's review queue;
-   `NOT_RECEIVED` belongs to PayPal Seller Protection, so the fund doesn't pay twice.
-3. `POST /claims/{id}/return-received` (PayMart): refunds the capture in full, reads the PayPal fee from the
-   capture, and pays PayMart's losses (return label, the fee, the item if it can't be resold) from the fund,
-   never more than the order total or the fund's balance.
-4. `POST /claims/{id}/review` (admin) decides queued claims. `GET /fund` shows the balance and ledger:
+1. `POST /orders/{id}/claims` (shopper): the problem goes to **PayMart first**, like any return. No AI runs.
+2. `POST /claims/{id}/merchant` (PayMart) with `action`:
+   - `accept_return`: a normal return under PayMart's own policy. PayMart refunds and carries the costs.
+   - `decline`: PayMart says no. PayPal's buyer protection still applies.
+   - `send_to_fund`: PayMart believes the agent got it wrong and hands the claim over. The request returns at
+     once with `SENT_TO_FUND`; MeantIt checks it afterwards on its own side, code first: only
+     orders MeantIt approved, with a signed request; a HOLD the shopper approved themselves isn't covered; repeat
+     claimers go to a person. Then the claim judge (Claude Sonnet) compares the claim with the signed request,
+     the Check record and anything published after checkout, and returns `AGENT_ERROR`, `CHANGED_MIND`,
+     `NOT_RECEIVED` or `SUSPICIOUS` with a confidence. Below 0.7, suspicious, or no AI goes to the admin's
+     review queue; `NOT_RECEIVED` belongs to PayPal Seller Protection, so the fund doesn't pay twice.
+     If the fund says no, PayMart can still accept or decline under its own policy. PayMart and the shopper
+     see only the outcome; the judge's reasoning shows in the admin console.
+3. `POST /claims/{id}/return-received` (PayMart): refunds the capture in full. For a fund claim it also reads
+   the PayPal fee from the capture and pays PayMart's losses (return label, the fee, the item if it can't be
+   resold) from the fund, never more than the order total or the fund's balance.
+4. `POST /claims/{id}/review` (admin) decides queued claims, or a `SENT_TO_FUND` claim the judge never
+   answered (a judge that answers late doesn't overwrite a person). `GET /fund` shows the balance and ledger:
    an opening sandbox reserve plus 1% of every captured order, minus reimbursements.
 
 The AI never moves money: it returns a verdict, and code checks the rules and calls PayPal.

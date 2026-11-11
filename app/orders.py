@@ -45,11 +45,12 @@ def register_key(user_id: str, body: KeyRegistration):
         jwk = slips.public_jwk(body.public_jwk)
     except (ValueError, KeyError):
         raise HTTPException(422, "public_jwk must be an EC P-256 public key")
-    with db.engine.begin() as conn:
-        if conn.execute(select(db.users.c.id).where(db.users.c.id == user_id)).first():
-            conn.execute(update(db.users).where(db.users.c.id == user_id).values(name=body.name, public_jwk=jwk))
-        else:
+    try:
+        with db.engine.begin() as conn:
             conn.execute(insert(db.users).values(id=user_id, name=body.name, public_jwk=jwk))
+    except IntegrityError:  # already registered, or the browser sent the same key twice at once
+        with db.engine.begin() as conn:
+            conn.execute(update(db.users).where(db.users.c.id == user_id).values(name=body.name, public_jwk=jwk))
     return get_user(user_id)
 
 
@@ -190,7 +191,10 @@ def get_order(order_id: str):
 def approve(order_id: str, x_user_id: str | None = Header(None)):
     """The user says "yes, I meant this": capture the held money."""
     order = _held_order(order_id, x_user_id)
-    capture = paypal.paymart().capture_authorization(order["authorization_id"], request_id=f"capture-{order_id}")
+    try:
+        capture = paypal.paymart().capture_authorization(order["authorization_id"], request_id=f"capture-{order_id}")
+    except paypal.PayPalError as err:
+        raise _paypal_down(order_id, err)
     _update(order_id, capture_id=capture["id"], payment_status="CAPTURED", resolution="APPROVED")
     return order_view(order_id)
 
@@ -199,9 +203,18 @@ def approve(order_id: str, x_user_id: str | None = Header(None)):
 def reject(order_id: str, x_user_id: str | None = Header(None)):
     """The user says "no": void the hold, nothing is charged."""
     order = _held_order(order_id, x_user_id)
-    paypal.paymart().void_authorization(order["authorization_id"], request_id=f"void-{order_id}")
+    try:
+        paypal.paymart().void_authorization(order["authorization_id"], request_id=f"void-{order_id}")
+    except paypal.PayPalError as err:
+        raise _paypal_down(order_id, err)
     _update(order_id, payment_status="VOIDED", resolution="REJECTED")
     return order_view(order_id)
+
+
+def _paypal_down(order_id: str, err: paypal.PayPalError) -> HTTPException:
+    """The answer isn't saved, so the shopper can simply try again; the request id stops PayPal doing it twice."""
+    log.error("order %s: PayPal call failed: %s", order_id, err)
+    return HTTPException(502, "PayPal didn't answer. Nothing changed; please try again.")
 
 
 def expire_holds(now: datetime | None = None) -> int:
