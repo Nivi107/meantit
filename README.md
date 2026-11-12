@@ -181,7 +181,7 @@ A run's picks are saved, so the same scene again costs nothing (`"fresh": true` 
 - `GET /dashboard/orders`: every agent order PayMart received, with the reasons and which demo agent placed it.
 - `GET /orders/{id}/evidence`: the four signed pieces as received, the signed Check record and the shopper's public key.
 - `GET /keys`: PayMart's and MeantIt's public keys. The dashboard's **Verify signatures** button re-checks
-  every signature and hash in the browser with these, so nobody has to trust our backend's word.
+  every signature and hash in the browser with these, so nobody has to trust the backend's word.
 
 ## Protection Fund and claims
 
